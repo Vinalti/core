@@ -64,6 +64,7 @@ from .domain_data import DomainData
 
 # Import config flow so that it's added to the registry
 from .entry_data import RuntimeEntryData
+from .voice_assistant import VoiceAssistantUDPServer
 
 CONF_DEVICE_NAME = "device_name"
 CONF_NOISE_PSK = "noise_psk"
@@ -284,6 +285,26 @@ async def async_setup_entry(  # noqa: C901
             _send_home_assistant_state(entity_id, attribute, hass.states.get(entity_id))
         )
 
+    pipeline_run: VoiceAssistantUDPServer | None = None
+
+    async def handle_pipeline_start() -> None:
+        """Start a voice assistant pipeline."""
+        nonlocal pipeline_run
+
+        if pipeline_run is not None:
+            return
+
+        server = VoiceAssistantUDPServer(hass, entry_data)
+        hass.async_create_task(await server.start())
+
+    async def handle_pipeline_stop() -> None:
+        """Stop a voice assistant pipeline."""
+        nonlocal pipeline_run
+
+        if pipeline_run is not None:
+            pipeline_run.stop()
+            pipeline_run = None
+
     async def on_connect() -> None:
         """Subscribe to states and list entities on successful API login."""
         nonlocal device_id
@@ -327,6 +348,9 @@ async def async_setup_entry(  # noqa: C901
             await cli.subscribe_states(entry_data.async_update_state)
             await cli.subscribe_service_calls(async_on_service_call)
             await cli.subscribe_home_assistant_states(async_on_state_subscription)
+            await cli.subscribe_voice_assistant(
+                handle_pipeline_start, handle_pipeline_stop
+            )
 
             hass.async_create_task(entry_data.async_save_to_store())
         except APIConnectionError as err:
